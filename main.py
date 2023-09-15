@@ -1,4 +1,5 @@
 import datetime
+import glob
 import json
 import math
 import os.path
@@ -99,17 +100,25 @@ reviews = pd.DataFrame(
              'is_credited', 'is_verified', 'is_answered', 'is_in_check', 'is_solved']
 )
 
-# a = pd.read_pickle('reviews/Альфа-Банк/Альфа-Банк.pkl.zip', compression='zip')
-# print(a.head())
-# print(a.shape)
+# path = 'reviews/**/*.pkl.zip'
+# files = glob.glob(path)
+#
+# df = []
+# for f in files:
+#     df.append(pd.read_pickle(f, compression='zip'))
+# df = pd.concat(df, axis=0, ignore_index=True)
+#
+# print(df.head())
+# print(df.info())
+# print(df.shape)
 # exit()
 
 f = open('logfile.txt', 'w')
 
 for index, value in banks.iterrows():
     # 28, 38, 63, 110, 121, 137, 145, 147, 155, 161, 167, 168, 170, 174, 175, 177, 178, 179, 180
-    if index < 130:
-        continue
+    # if index < 130:
+    #     continue
 
     # if value['reviews_count'] > 100000:
     #     break
@@ -147,7 +156,7 @@ for index, value in banks.iterrows():
             a = {}
             reviews_html = {}
             for i in from_html:
-                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '').replace('&amp;', '&')\
+                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '').replace('&amp;', '&') \
                     .replace('&#039;', "'")
                 published = i.find_all("span")
                 published = published[-1].text if '.' in published[-1].text else published[-3].text
@@ -201,8 +210,6 @@ for index, value in banks.iterrows():
                 review['is_in_check'] = 1 if 'проверяется' in review_html else 0
                 review['is_verified'] = 1 if 'отзыв проверен' in review_html else 0
                 review['is_answered'] = 1 if 'ответ банка' in review_html else 0
-
-                # reviews_html Зачтено, Отзыв проверен, Ответ банка
 
                 reviews = pd.concat([reviews, review.to_frame().T])
         except Exception as e:
