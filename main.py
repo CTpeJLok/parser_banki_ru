@@ -104,10 +104,12 @@ reviews = pd.DataFrame(
 # print(a.shape)
 # exit()
 
+f = open('logfile.txt', 'w')
+
 for index, value in banks.iterrows():
-    # 155, 160, 161, 167, 168, 170, 171, 172, 173, 174, 175
-    # if index < 180:
-    #     continue
+    # 28, 38, 63, 110, 121, 137, 145, 147, 155, 161, 167, 168, 170, 174, 175, 177, 178, 179, 180
+    if index < 130:
+        continue
 
     # if value['reviews_count'] > 100000:
     #     break
@@ -145,7 +147,8 @@ for index, value in banks.iterrows():
             a = {}
             reviews_html = {}
             for i in from_html:
-                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '').replace('&amp;', '&')
+                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '').replace('&amp;', '&')\
+                    .replace('&#039;', "'")
                 published = i.find_all("span")
                 published = published[-1].text if '.' in published[-1].text else published[-3].text
                 published = datetime.datetime.strptime(published.strip(), '%d.%m.%Y %H:%M')
@@ -164,6 +167,7 @@ for index, value in banks.iterrows():
             json_html = re.sub('\\\\', ' ', json_html)
             json_html = re.sub('&quot;', "'", json_html)
             json_html = re.sub('&amp;', "&", json_html)
+            json_html = re.sub('&#039;', "'", json_html)
 
             json_html = json_html[json_html.find('>') + 1:]
             json_html = json_html[: json_html.find('</script>')]
@@ -205,6 +209,10 @@ for index, value in banks.iterrows():
             print(response.url)
             print(e)
             try:
+                f.write(response.url)
+                f.write(e)
+                f.write(json_html)
+                f.write('\n')
                 print(json_html)
             except:
                 pass
@@ -219,3 +227,5 @@ for index, value in banks.iterrows():
     bank_reviews.to_pickle(f'{path}{value["name"]}.pkl.zip'.replace('|', ' '), compression='zip')
 
     print(f'{index}.{value["name"]}: {time.time() - tm}')
+
+f.close()
