@@ -2,6 +2,7 @@ import datetime
 import json
 import math
 import os.path
+import random
 import re
 import time
 
@@ -11,7 +12,14 @@ import requests
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
-from .Data import proxy
+from Data import proxies
+
+
+def exception_handler(request: requests.Request, exception: Exception) -> requests.Response:
+    get = requests.get(request.url, headers={'user-agent': UserAgent().random}, proxies=random.choice(proxies))
+    get.close()
+    return get
+
 
 # pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -28,7 +36,8 @@ else:
     )
 
     for i in range(1, 7 + 1):
-        request = requests.get(f'{bank_list_url}{i}', headers={'user-agent': UserAgent().random}, proxies=proxy)
+        request = requests.get(f'{bank_list_url}{i}', headers={'user-agent': UserAgent().random},
+                               proxies=random.choice(proxies))
         request.close()
         root = request.content
 
@@ -36,7 +45,7 @@ else:
         tbody = root.find('tbody')
         trs = tbody.find_all('tr')
 
-        scripts = root.find_all('script', type='application/ld+json')
+        bank_info_jsons = root.find_all('script', type='application/ld+json')
 
         for tr in trs:
             tds = tr.find_all('td')
@@ -48,20 +57,19 @@ else:
             bank['answers_count'] = int(''.join(tds[4].text.strip().split()))
             bank['solve_percent'] = int(tds[5].text.strip()[:-1])
 
-            while len(scripts) > 0:
-                script = str(scripts[0]).strip()
+            while len(bank_info_jsons) > 0:
+                bank_info_json = str(bank_info_jsons[0]).strip()
+                bank_info_jsons = bank_info_jsons[1:]
 
-                scripts = scripts[1:]
+                bank_info_json = re.sub('(\\t|\\n|\\r|\\xa0)', '', bank_info_json)
+                bank_info_json = re.sub('(&lt;(.{2}|.{1})&gt;|&lt;\/.{2}&gt;)', '', bank_info_json)
+                bank_info_json = re.sub('\\\\', ' ', bank_info_json)
+                bank_info_json = re.sub('&quot;', "'", bank_info_json)
 
-                script = re.sub('(\\t|\\n|\\r|\\xa0)', '', script)
-                script = re.sub('(&lt;(.{2}|.{1})&gt;|&lt;\/.{2}&gt;)', '', script)
-                script = re.sub('\\\\', ' ', script)
-                script = re.sub('&quot;', "'", script)
+                bank_info_json = bank_info_json[bank_info_json.find('>') + 1:]
+                bank_info_json = bank_info_json[: bank_info_json.find('</script>')]
 
-                script = script[script.find('>') + 1:]
-                script = script[: script.find('</script>')]
-
-                bank_info_json = json.loads(script)
+                bank_info_json = json.loads(bank_info_json)
 
                 if bank_info_json['@type'] != 'Product':
                     break
@@ -87,29 +95,22 @@ print(banks.head())
 print(banks.info())
 
 reviews = pd.DataFrame(
-    columns=['bank_index', 'author', 'published', 'name', 'text', 'rating', 'best_rating', 'worst_rating', 'url']
+    columns=['bank_index', 'author', 'published', 'name', 'text', 'rating', 'best_rating', 'worst_rating', 'url',
+             'is_credited', 'is_verified', 'is_answered', 'is_in_check', 'is_solved']
 )
-
-
-def exception_handler(request: requests.Request, exception: Exception) -> requests.Response:
-    get = requests.get(request.url, headers={'user-agent': UserAgent().random}, proxies=proxy)
-    get.close()
-    return get
-
 
 # a = pd.read_pickle('reviews/Альфа-Банк/Альфа-Банк.pkl.zip', compression='zip')
 # print(a.head())
 # print(a.shape)
 # exit()
 
-
 for index, value in banks.iterrows():
     # 155, 160, 161, 167, 168, 170, 171, 172, 173, 174, 175
-    if index < 180:
-        continue
+    # if index < 180:
+    #     continue
 
     # if value['reviews_count'] > 100000:
-    #     continue
+    #     break
 
     print(f'{index}.{value["name"]}: parsing...')
     page_count = math.ceil(value['reviews_count'] / 25)
@@ -119,7 +120,7 @@ for index, value in banks.iterrows():
     tm = time.time()
 
     gets = (grequests.get(f'{site_url}{value["url"]}?type=all&page={i}', headers={'user-agent': UserAgent().random},
-                          proxies=proxy)
+                          proxies=random.choice(proxies))
             for i in range(1, page_count + 1))
     responses = grequests.map(gets, size=16, exception_handler=exception_handler)
 
@@ -133,39 +134,41 @@ for index, value in banks.iterrows():
 
         try:
             root = response.content
-
             root = BeautifulSoup(root, 'lxml')
-            # f = open('saved.html', 'w', encoding='utf-8')
-            # f.writelines(str(root))
-            # f.close()
 
             a = root.find_all('a', {'href': re.compile(r'^\/services\/responses\/bank\/response.*'),
                                     'data-gtm-click': '{"event":"GTM_event","eventCategory":"ux_data","eventAction":"click_responses_response_user_rating_banks"}'})
-            reviews_html = [i.parent.parent.parent for i in a if '#' not in i['href']]
-            a = reviews_html[::2]
-            res = {}
-            for i in a:
-                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '')
+
+            from_html = [i.parent.parent.parent for i in a if '#' not in i['href']]
+            from_html = from_html[::2]
+
+            a = {}
+            reviews_html = {}
+            for i in from_html:
+                name = i.find("a").text.strip().replace('"', "'").replace('\xa0', '').replace('&amp;', '&')
                 published = i.find_all("span")
                 published = published[-1].text if '.' in published[-1].text else published[-3].text
                 published = datetime.datetime.strptime(published.strip(), '%d.%m.%Y %H:%M')
                 published = published.strftime('%Y-%m-%d %H:%M')
-                res[f'{name}{published}'] = i.find('a')['href']
-            a = res.copy()
 
-            script = root.find('script', type='application/ld+json')
+                key = f'{name}{published}'
+                a[key] = i.find('a')['href']
+                reviews_html[key] = i
 
-            script = str(script).strip()
-            script = re.sub('(\\t|\\r|\\xa0)', '', script)
-            script = re.sub('(\\n)', ' ', script)
-            script = re.sub('(&lt;(.{2}|.{1})&gt;|&lt;\/.{2}&gt;)', '', script)
-            script = re.sub('\\\\', ' ', script)
-            script = re.sub('&quot;', "'", script)
+            json_html = root.find('script', type='application/ld+json')
 
-            script = script[script.find('>') + 1:]
-            script = script[: script.find('</script>')]
+            json_html = str(json_html).strip()
+            json_html = re.sub('(\\t|\\r|\\xa0)', '', json_html)
+            json_html = re.sub('(\\n)', ' ', json_html)
+            json_html = re.sub('(&lt;(.{2}|.{1})&gt;|&lt;\/.{2}&gt;)', '', json_html)
+            json_html = re.sub('\\\\', ' ', json_html)
+            json_html = re.sub('&quot;', "'", json_html)
+            json_html = re.sub('&amp;', "&", json_html)
 
-            bank_info_json = json.loads(script)
+            json_html = json_html[json_html.find('>') + 1:]
+            json_html = json_html[: json_html.find('</script>')]
+
+            bank_info_json = json.loads(json_html)
             reviews_list = bank_info_json['review']
 
             for review_json in reviews_list:
@@ -182,7 +185,18 @@ for index, value in banks.iterrows():
                 review['best_rating'] = review_rating['bestRating'].strip()
                 review['worst_rating'] = review_rating['worstRating'].strip()
 
-                review['url'] = a[f'{review["name"]}{review["published"][:-3]}']
+                key = f'{review["name"]}{review["published"][:-3]}'
+                number = a[key]
+                number = re.search(r'\d+', number).group(0)
+                review['url'] = number
+
+                review_html = reviews_html[key]
+                review_html = str(review_html).lower()
+                review['is_credited'] = 1 if 'зачтено' in review_html else 0
+                review['is_solved'] = 1 if 'проблема решена' in review_html else 0
+                review['is_in_check'] = 1 if 'проверяется' in review_html else 0
+                review['is_verified'] = 1 if 'отзыв проверен' in review_html else 0
+                review['is_answered'] = 1 if 'ответ банка' in review_html else 0
 
                 # reviews_html Зачтено, Отзыв проверен, Ответ банка
 
@@ -191,7 +205,7 @@ for index, value in banks.iterrows():
             print(response.url)
             print(e)
             try:
-                print(script)
+                print(json_html)
             except:
                 pass
 
